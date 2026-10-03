@@ -53,18 +53,41 @@ public repositories.
 **Managing accounts:** the tracked accounts are the lines in [`traders/ai.txt`](traders/ai.txt) and
 [`traders/geopolitics.txt`](traders/geopolitics.txt). Put one wallet address per line, optionally followed by a
 space and a label. Edit them on GitHub (pencil icon → **Commit changes**). The **Add** form on the published
-dashboard prepares the line for you and opens the right file. Changes apply on the next run.
+dashboard prepares the line for you and opens the right file. Committing a change starts a run straight away, so
+the account appears within a minute or two.
 
 Good to know:
 
 - The first check of a newly listed account fills the dashboard with its qualifying trades from the past 24 hours.
   Only trades from the last hour are sent as notifications, so you are not flooded with old ones.
-- GitHub can start scheduled runs a few minutes late when it is busy, so alerts may lag a little behind the trade.
+- GitHub runs schedules on a best-effort basis. When it is busy, runs start a few minutes late, so alerts may lag
+  a little behind the trade. For a brand-new repository, GitHub sometimes takes much longer to start the schedule
+  at all; see [below](#if-the-5-minute-schedule-doesnt-run).
 - The published dashboard is public, like the repository. Its data comes from Polymarket's public API.
 - Between runs, the tracker remembers what it has already reported on the `tracker-state` branch.
 - To pause it: **Actions → Tracker → ⋯ → Disable workflow**. GitHub also pauses scheduled workflows after 60 days
   without repository activity. Re-enable it on the same page.
 - If you also run the app yourself with the same notification settings, you will get every notification twice.
+
+### If the 5-minute schedule doesn't run
+
+The **Actions** tab lists every run with what started it. Scheduled runs say **schedule**. If none appear, GitHub's
+scheduler has not picked the workflow up. A free external scheduler can start the workflow every 5 minutes
+instead, which is also more punctual:
+
+1. **Create a token that can only start workflows in this repository.** On GitHub go to **Settings → Developer
+   settings → Personal access tokens → Fine-grained tokens → Generate new token**. Under **Repository access**
+   choose **Only select repositories** and pick this repository. Under **Permissions → Repository permissions** set
+   **Actions** to **Read and write**. Generate the token and copy it.
+2. **Create a job at a scheduler such as [cron-job.org](https://cron-job.org)** (free account) with:
+   - **URL:** `https://api.github.com/repos/<owner>/<repository>/actions/workflows/tracker.yml/dispatches`
+   - **Schedule:** every 5 minutes
+   - **Request method:** `POST`
+   - **Headers:** `Authorization: Bearer <your token>` and `Accept: application/vnd.github+json`
+   - **Request body:** `{"ref":"<default branch name>"}`
+
+   GitHub answers `204 No Content` when it starts a run. The token can only start workflows; if it ever leaks,
+   delete it on the same GitHub page.
 
 ## Quick start
 
