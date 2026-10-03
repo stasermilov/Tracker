@@ -1,0 +1,17 @@
+{
+  "name": "polymarket-trader-tracker",
+  "version": "1.0.0",
+  "description": "Tracks selected Polymarket traders and sends notifications when they take liquidity in trades worth more than $30.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "private": true
+}

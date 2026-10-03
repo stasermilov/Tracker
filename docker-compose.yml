@@ -1,0 +1,21 @@
+services:
+  tracker:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Fixed inside the container; change the published port below instead.
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATA_DIR: /app/data
+    ports:
+      # Reachable from this machine only. To open it to your network use
+      # "3000:3000" and set BASIC_AUTH in .env.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - tracker-data:/app/data
+
+volumes:
+  tracker-data:

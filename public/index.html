@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Trader Tracker</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="container">
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-mark" src="/favicon.svg" alt="" width="36" height="36">
+        <div>
+          <h1>Trader Tracker</h1>
+          <p class="brand-sub" id="conditions-summary">Polymarket taker trades</p>
+        </div>
+      </div>
+      <div class="run-status" id="run-status">
+        <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+        <span class="status-text" id="status-text" role="status" aria-live="polite">Connecting…</span>
+        <button type="button" class="btn" id="check-now">Check now</button>
+      </div>
+    </header>
+
+    <section class="notify-bar" aria-label="Notifications">
+      <div class="notify-group">
+        <span class="notify-label">Notifications</span>
+        <button type="button" class="btn btn-small" id="browser-toggle" aria-pressed="false">Browser alerts: off</button>
+        <ul class="channel-list" id="channel-list"></ul>
+      </div>
+      <button type="button" class="btn btn-small btn-ghost" id="test-notify">Send test</button>
+    </section>
+
+    <nav class="tabs" role="tablist" aria-label="Trader categories" id="tabs"></nav>
+    <main id="panels"></main>
+
+    <footer class="footer">
+      Data from Polymarket's public Data API. A trade qualifies when a tracked account was the price taker (its order
+      crossed the spread) and the trade was worth more than the configured dollar amount.
+    </footer>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+</body>
+</html>
