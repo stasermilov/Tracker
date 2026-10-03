@@ -11,6 +11,9 @@ on:
     # Every 5 minutes, offset from the top of the hour, when GitHub is busiest
     # and scheduled runs are most often delayed.
     - cron: "2-59/5 * * * *"
+  # Also run right after changes are pushed (e.g. an edit to traders/*.txt),
+  # so a newly listed account shows up without waiting for the schedule.
+  push:
   workflow_dispatch:
 
 permissions:
@@ -24,6 +27,8 @@ concurrency:
 
 jobs:
   check:
+    # Pushes to other branches don't run the tracker.
+    if: github.event_name != 'push' || github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
