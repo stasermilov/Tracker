@@ -12,6 +12,8 @@ test('defaults match the tracking rules: every 5 minutes, trades over $30', () =
   assert.equal(config.host, '127.0.0.1');
   assert.equal(config.port, 3000);
   assert.equal(config.basicAuth, null);
+  assert.equal(config.backfillHours, 0, 'only trades after an account is added alert by default');
+  assert.equal(loadConfig({ BACKFILL_HOURS: '24' }).backfillHours, 24);
   assert.equal(config.polymarket.tradesApi, 'auto');
   assert.equal(config.polymarket.dataApiUrl, 'https://data-api.polymarket.com');
 });
@@ -35,6 +37,7 @@ test('rejects invalid values with a helpful message', () => {
   assert.throws(() => loadConfig({ POLL_INTERVAL_MINUTES: '0' }), /POLL_INTERVAL_MINUTES/);
   assert.throws(() => loadConfig({ MIN_TRADE_USD: 'thirty' }), /MIN_TRADE_USD/);
   assert.throws(() => loadConfig({ PORT: '3000.5' }), /PORT/);
+  assert.throws(() => loadConfig({ BACKFILL_HOURS: '-1' }), /BACKFILL_HOURS/);
   assert.throws(() => loadConfig({ DISCORD_WEBHOOK_URL: 'not a url' }), /DISCORD_WEBHOOK_URL/);
   assert.throws(() => loadConfig({ BASIC_AUTH: 'nopassword' }), /BASIC_AUTH/);
   assert.throws(() => loadConfig({ POLYMARKET_TRADES_API: 'v3' }), /POLYMARKET_TRADES_API/);

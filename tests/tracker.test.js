@@ -123,8 +123,14 @@ describe('Tracker', () => {
   let tracker;
   let nowMs;
 
-  async function setup(seed = { ai: [ALICE], geopolitics: [] }) {
-    store = new Store({ file: path.join(dir, 'state.json'), now: () => nowMs, logger: quiet, seed });
+  async function setup(seed = { ai: [ALICE], geopolitics: [] }, { backfillHours = 0 } = {}) {
+    store = new Store({
+      file: path.join(dir, 'state.json'),
+      now: () => nowMs,
+      logger: quiet,
+      seed,
+      backfillSeconds: backfillHours * 3600,
+    });
     await store.load();
     client = fakeClient();
     notifier = fakeNotifier();
@@ -132,7 +138,7 @@ describe('Tracker', () => {
       store,
       client,
       notifier,
-      config: { pollIntervalMinutes: 5, minTradeUsd: 30, lateTradeGraceMinutes: 60 },
+      config: { pollIntervalMinutes: 5, minTradeUsd: 30, lateTradeGraceMinutes: 60, backfillHours },
       logger: quiet,
       now: () => nowMs,
       requestSpacingMs: 0,
@@ -175,6 +181,24 @@ describe('Tracker', () => {
     run = await tracker.runCheck();
     assert.equal(run.newAlerts, 0, 'the same trade does not alert again');
     assert.equal(notifier.batches.length, 1);
+  });
+
+  test('with BACKFILL_HOURS, the first check also reports recent qualifying trades', async () => {
+    await setup({ ai: [ALICE], geopolitics: [] }, { backfillHours: 3 });
+    client.trades[ALICE] = [
+      tradeRow({ timestamp: T0 - 2 * 3600, key: 'two-hours-ago' }),
+      tradeRow({ timestamp: T0 - 4 * 3600, key: 'four-hours-ago' }),
+    ];
+    let run = await tracker.runCheck();
+    assert.equal(run.newAlerts, 1);
+    assert.equal(store.state.alerts[0].trade.timestamp, T0 - 2 * 3600);
+
+    // Accounts added later get the same look-back window.
+    client.trades[BOB] = [tradeRow({ wallet: BOB, timestamp: T0 - 3600, key: 'bob-hour-ago' })];
+    const { trader } = await tracker.addTrader('geopolitics', BOB);
+    assert.equal(trader.trackingSince, T0 - 3 * 3600);
+    run = await tracker.runCheck();
+    assert.equal(run.newAlerts, 1);
   });
 
   test('passes the minimum amount and look-back floor to the client', async () => {

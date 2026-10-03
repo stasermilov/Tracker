@@ -49,6 +49,24 @@ docker compose up -d --build
 The dashboard is published on <http://localhost:3000> (this machine only), and state is kept in the
 `tracker-data` volume.
 
+### Trying it out
+
+1. Start the app and open the dashboard. Within a few seconds every account shows **Checked just now** and its
+   Polymarket name. That confirms the app can reach Polymarket. If an account shows **⚠ Last check failed**, hover
+   over it to see why.
+2. Press **Send test** to check your notification channels, or turn on **Browser alerts**.
+3. By default only trades made *after* an account starts being tracked alert, so the trade feed starts empty and
+   fills as the accounts trade. To see real alerts straight away, start with fresh state and a look-back window:
+
+   ```bash
+   rm -f data/state.json      # only if you have run the app before
+   BACKFILL_HOURS=24 npm start
+   ```
+
+   On Windows, or with Docker, put `BACKFILL_HOURS=24` in `.env` instead. The first check then also reports (and
+   notifies about) qualifying trades from the past 24 hours. Remove the setting afterwards if you only want new
+   trades for accounts you add later.
+
 ## Notifications
 
 Configure any number of channels in `.env`, restart, then press **Send test** in the dashboard to confirm. Each
@@ -84,7 +102,8 @@ Every check, for each tracked account:
    `GET /trades?user=…&takerOnly=true&filterType=CASH&filterAmount=30` automatically.
 2. Each trade's value (`size × price`) must be **strictly greater** than `MIN_TRADE_USD`, so $30.00 exactly does
    not qualify.
-3. Only trades made **after the account was added** alert, and each trade alerts **once**. The app remembers which
+3. Only trades made **after the account was added** alert (or up to `BACKFILL_HOURS` before, if set), and each
+   trade alerts **once**. The app remembers which
    trades it has processed, so restarts never repeat alerts. Trades made while the app was offline are picked up
    on the next check. Trades that Polymarket's API reports a little late (up to `LATE_TRADE_GRACE_MINUTES`) are
    still caught.
@@ -111,6 +130,7 @@ All settings are optional environment variables, which can be put in `.env`.
 | `BASIC_AUTH` | (unset) | `user:password` to protect the dashboard. Set it whenever other machines can reach it. |
 | `DATA_DIR` | `./data` | Where `state.json` (tracked accounts, alert history) is stored. |
 | `LATE_TRADE_GRACE_MINUTES` | `60` | How late a trade may show up in the API and still alert. |
+| `BACKFILL_HOURS` | `0` | When an account starts being tracked, also alert on its qualifying trades from the past N hours. |
 | `MAX_ALERTS` | `1000` | Alert history size. |
 | `POLYMARKET_TRADES_API` | `auto` | `auto`, `v2` or `v1`. Selects the trades endpoint. |
 | `POLYMARKET_DATA_API_URL`, `POLYMARKET_GAMMA_API_URL` | Polymarket | Override the API base URLs. |

@@ -162,6 +162,7 @@ export class Tracker extends EventEmitter {
     this.requestSpacingMs = requestSpacingMs;
     this.intervalMs = Math.round(config.pollIntervalMinutes * 60_000);
     this.graceSeconds = Math.round(config.lateTradeGraceMinutes * 60);
+    this.backfillSeconds = Math.round((config.backfillHours ?? 0) * 3600);
   }
 
   /** Starts the polling schedule; the first check runs after `initialDelayMs`. */
@@ -428,7 +429,7 @@ export class Tracker extends EventEmitter {
     let trader = traders[address];
     const created = !trader;
     if (!trader) {
-      trader = newTraderRecord(address, nowMs);
+      trader = newTraderRecord(address, nowMs, this.backfillSeconds);
       traders[address] = trader;
     }
     trader.categories[category.id] = { addedAt: nowMs };

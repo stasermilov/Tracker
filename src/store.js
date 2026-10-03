@@ -6,7 +6,11 @@ export const STATE_VERSION = 1;
 
 const CATEGORY_IDS = new Set(CATEGORIES.map((category) => category.id));
 
-export function newTraderRecord(address, nowMs) {
+/**
+ * @param {number} [backfillSeconds] how far before `nowMs` trades still count,
+ *   so a newly tracked account can report its recent history.
+ */
+export function newTraderRecord(address, nowMs, backfillSeconds = 0) {
   return {
     address,
     label: null,
@@ -18,7 +22,7 @@ export function newTraderRecord(address, nowMs) {
     // categoryId -> { addedAt }
     categories: {},
     // Trades before this moment (epoch seconds) never alert.
-    trackingSince: Math.floor(nowMs / 1000),
+    trackingSince: Math.floor(nowMs / 1000) - backfillSeconds,
     // Newest qualifying trade timestamp seen so far (epoch seconds).
     lastTradeTs: 0,
     // tradeKey -> trade timestamp, for qualifying trades already processed.
@@ -31,12 +35,12 @@ export function newTraderRecord(address, nowMs) {
   };
 }
 
-export function createInitialState(nowMs, seed = SEED_TRADERS) {
+export function createInitialState(nowMs, seed = SEED_TRADERS, backfillSeconds = 0) {
   const traders = {};
   for (const [category, addresses] of Object.entries(seed)) {
     for (const address of addresses) {
       const key = address.toLowerCase();
-      traders[key] ??= newTraderRecord(key, nowMs);
+      traders[key] ??= newTraderRecord(key, nowMs, backfillSeconds);
       traders[key].categories[category] = { addedAt: nowMs };
     }
   }
@@ -68,12 +72,13 @@ export class Store {
   #state = null;
   #writes = Promise.resolve();
 
-  constructor({ file, maxAlerts = 1000, now = Date.now, logger = console, seed = SEED_TRADERS }) {
+  constructor({ file, maxAlerts = 1000, now = Date.now, logger = console, seed = SEED_TRADERS, backfillSeconds = 0 }) {
     this.file = file;
     this.maxAlerts = maxAlerts;
     this.now = now;
     this.logger = logger;
     this.seed = seed;
+    this.backfillSeconds = backfillSeconds;
   }
 
   get state() {
@@ -104,7 +109,7 @@ export class Store {
   }
 
   async #startFresh(reason) {
-    this.#state = createInitialState(this.now(), this.seed);
+    this.#state = createInitialState(this.now(), this.seed, this.backfillSeconds);
     const count = Object.keys(this.#state.traders).length;
     this.logger.info(`${reason}; starting with ${count} seeded trader${count === 1 ? '' : 's'}`);
     await this.save();

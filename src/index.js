@@ -18,7 +18,12 @@ async function main() {
   loadEnvFile(path.resolve('.env'));
   const config = loadConfig();
 
-  const store = new Store({ file: path.join(config.dataDir, 'state.json'), maxAlerts: config.maxAlerts, logger });
+  const store = new Store({
+    file: path.join(config.dataDir, 'state.json'),
+    maxAlerts: config.maxAlerts,
+    backfillSeconds: Math.round(config.backfillHours * 3600),
+    logger,
+  });
   await store.load();
   const client = new PolymarketClient({ ...config.polymarket, logger });
   const notifier = new Notifier(config.notifications, { logger, categoryName, minTradeUsd: config.minTradeUsd });
@@ -38,6 +43,9 @@ async function main() {
     `Tracking ${traderCount} account${traderCount === 1 ? '' : 's'}; checking every ${config.pollIntervalMinutes} min `
       + `for taker trades worth more than $${config.minTradeUsd}`,
   );
+  if (config.backfillHours > 0) {
+    logger.info(`BACKFILL_HOURS=${config.backfillHours}: newly tracked accounts also report qualifying trades from the past ${config.backfillHours} h`);
+  }
   const channels = notifier.describeChannels().filter((channel) => channel.configured).map((channel) => channel.name);
   logger.info(channels.length
     ? `Push notifications: ${channels.join(', ')}`

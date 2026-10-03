@@ -102,6 +102,7 @@ export function loadConfig(env = process.env) {
     pollIntervalMinutes: readNumber(env, 'POLL_INTERVAL_MINUTES', 5, { min: 1, max: 1440 }),
     minTradeUsd: readNumber(env, 'MIN_TRADE_USD', 30, { min: 0 }),
     lateTradeGraceMinutes: readNumber(env, 'LATE_TRADE_GRACE_MINUTES', 60, { min: 0, max: 10080 }),
+    backfillHours: readNumber(env, 'BACKFILL_HOURS', 0, { min: 0, max: 720 }),
     maxAlerts: readNumber(env, 'MAX_ALERTS', 1000, { min: 10, max: 100000, integer: true }),
     basicAuth: env.BASIC_AUTH ? parseBasicAuth(env.BASIC_AUTH) : null,
     polymarket: {

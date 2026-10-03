@@ -31,6 +31,14 @@ test('first start tracks the nine seeded AI accounts and saves them', async () =
   assert.equal(Object.keys(saved.traders).length, 9);
 });
 
+test('BACKFILL_HOURS moves the seeded accounts\' tracking start back', async () => {
+  const store = new Store({ file, now: () => 1_790_000_000_000, logger: quiet, backfillSeconds: 24 * 3600 });
+  await store.load();
+  for (const trader of Object.values(store.state.traders)) {
+    assert.equal(trader.trackingSince, 1_790_000_000 - 24 * 3600);
+  }
+});
+
 test('state survives a restart', async () => {
   const first = new Store({ file, logger: quiet });
   await first.load();
