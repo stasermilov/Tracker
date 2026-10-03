@@ -9,6 +9,7 @@ WORKDIR /app
 COPY package.json ./
 COPY src ./src
 COPY public ./public
+COPY traders ./traders
 RUN mkdir -p /app/data && chown node:node /app/data
 
 USER node

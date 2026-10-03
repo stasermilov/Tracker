@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { readTraderLists, TRADERS_DIR } from './traders-file.js';
 
 /** Dashboard tabs. A tracked trader can belong to any number of them. */
 export const CATEGORIES = Object.freeze([
@@ -7,21 +8,11 @@ export const CATEGORIES = Object.freeze([
   Object.freeze({ id: 'geopolitics', name: 'Geopolitics' }),
 ]);
 
-/** Accounts tracked on first start, before any state has been saved. */
-export const SEED_TRADERS = Object.freeze({
-  ai: Object.freeze([
-    '0x9aeb534c42b58b21673d5e03e9da14fbd15b2729',
-    '0x2110ba2a1e18840109482ff4ddc547baeff45850',
-    '0xb10047d6a254b2ebb306d7a7d13bf59171ab6461',
-    '0x736539924a5602b37a03a54fc12c1cc8f98964da',
-    '0xbf93328f8b69273453228a82c913207731822fd7',
-    '0x8a4c788f043023b8b28a762216d037e9f148532b',
-    '0x564f22744b7941ade18d5e0e4f347c30e3057026',
-    '0x28b291aa82da13e1d58993873806c92908d5eb4f',
-    '0xb89f5425341719d298dc2f5b9a92374f5fde1c44',
-  ]),
-  geopolitics: Object.freeze([]),
-});
+/**
+ * Accounts tracked on first start, before any state has been saved, from
+ * traders/<category>.txt: categoryId -> [{address, label}].
+ */
+export const SEED_TRADERS = readTraderLists(TRADERS_DIR, CATEGORIES.map((category) => category.id)).lists;
 
 export function categoryName(id) {
   return CATEGORIES.find((category) => category.id === id)?.name ?? id;
@@ -103,6 +94,7 @@ export function loadConfig(env = process.env) {
     minTradeUsd: readNumber(env, 'MIN_TRADE_USD', 30, { min: 0 }),
     lateTradeGraceMinutes: readNumber(env, 'LATE_TRADE_GRACE_MINUTES', 60, { min: 0, max: 10080 }),
     backfillHours: readNumber(env, 'BACKFILL_HOURS', 0, { min: 0, max: 720 }),
+    notifyMaxAgeMinutes: readNumber(env, 'NOTIFY_MAX_AGE_MINUTES', 0, { min: 0 }),
     maxAlerts: readNumber(env, 'MAX_ALERTS', 1000, { min: 10, max: 100000, integer: true }),
     basicAuth: env.BASIC_AUTH ? parseBasicAuth(env.BASIC_AUTH) : null,
     polymarket: {

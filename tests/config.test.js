@@ -14,6 +14,7 @@ test('defaults match the tracking rules: every 5 minutes, trades over $30', () =
   assert.equal(config.basicAuth, null);
   assert.equal(config.backfillHours, 0, 'only trades after an account is added alert by default');
   assert.equal(loadConfig({ BACKFILL_HOURS: '24' }).backfillHours, 24);
+  assert.equal(config.notifyMaxAgeMinutes, 0, 'no age limit on notifications by default');
   assert.equal(config.polymarket.tradesApi, 'auto');
   assert.equal(config.polymarket.dataApiUrl, 'https://data-api.polymarket.com');
 });

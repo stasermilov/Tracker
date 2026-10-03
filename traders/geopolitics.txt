@@ -1,0 +1,4 @@
+# Polymarket accounts tracked in the Geopolitics tab.
+# One wallet address (or polymarket.com/profile/0x... link) per line. Text after
+# the address, separated by a space, is shown as the account's label.
+# Lines starting with # are ignored.

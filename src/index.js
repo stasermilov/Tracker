@@ -1,16 +1,11 @@
 import path from 'node:path';
 import { categoryName, loadConfig, loadEnvFile } from './config.js';
+import { logger } from './logger.js';
 import { Notifier } from './notifier.js';
 import { PolymarketClient } from './polymarket.js';
 import { createServer } from './server.js';
 import { Store } from './store.js';
 import { Tracker } from './tracker.js';
-
-const logger = {
-  info: (message) => console.log(`${new Date().toISOString()} INFO  ${message}`),
-  warn: (message) => console.warn(`${new Date().toISOString()} WARN  ${message}`),
-  error: (message) => console.error(`${new Date().toISOString()} ERROR ${message}`),
-};
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 

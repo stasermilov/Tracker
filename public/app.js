@@ -1,11 +1,21 @@
 'use strict';
 
+// The page runs in two modes. Served by the tracker's own server, it uses the
+// live API and event stream. Published as a static site (GitHub Pages), it
+// reads the data.json snapshot written by the scheduled GitHub Actions run.
+const DATA_URL = document.querySelector('meta[name="tracker-data"]')?.content || null;
+const HOSTED = Boolean(DATA_URL);
+const HOSTED_POLL_MS = 60_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RECENT = { id: 'recent', name: 'Last 24 hours' };
+
 const $ = (id) => document.getElementById(id);
 const els = {
   conditions: $('conditions-summary'),
   statusDot: $('status-dot'),
   statusText: $('status-text'),
   checkNow: $('check-now'),
+  runLink: $('run-link'),
   browserToggle: $('browser-toggle'),
   channelList: $('channel-list'),
   testNotify: $('test-notify'),
@@ -22,12 +32,17 @@ const model = {
   status: null,
   channels: [],
   connected: false,
+  generatedAt: null,
+  hosted: null,
+  refreshError: null,
 };
 
 const tabRefs = new Map();
 const panels = new Map();
 const freshAlertIds = new Set();
 let activeTab = null;
+
+const views = () => [RECENT, ...model.categories];
 
 // ---------- storage (best effort: may be unavailable in private modes) ----------
 
@@ -59,6 +74,7 @@ const formatShares = (value) => sharesFormat.format(value);
 const formatDate = (ms) => dateFormat.format(new Date(ms));
 const shortAddress = (address) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+const minUsdLabel = () => formatUsd(model.conditions.minTradeUsd).replace(/\.00$/, '');
 
 function formatPrice(price) {
   const cents = Math.round(price * 1000) / 10;
@@ -135,7 +151,7 @@ function toast(message, kind = 'info', ms = 5000) {
   setTimeout(() => el.remove(), ms);
 }
 
-// ---------- API ----------
+// ---------- data ----------
 
 async function api(method, url, body) {
   const options = { method, headers: { accept: 'application/json' } };
@@ -154,8 +170,14 @@ async function api(method, url, body) {
   return data;
 }
 
+async function fetchHostedData() {
+  const response = await fetch(`${DATA_URL}?t=${Date.now()}`, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
 async function loadState() {
-  const state = await api('GET', '/api/state');
+  const state = HOSTED ? await fetchHostedData() : await api('GET', '/api/state');
   Object.assign(model, {
     categories: state.categories,
     conditions: state.conditions,
@@ -163,7 +185,21 @@ async function loadState() {
     alerts: state.alerts,
     status: state.status,
     channels: state.channels,
+    generatedAt: state.generatedAt ?? null,
+    hosted: state.hosted ?? null,
   });
+}
+
+function githubUrl(...parts) {
+  const hosted = model.hosted;
+  if (!hosted?.repository) return null;
+  return [hosted.serverUrl || 'https://github.com', hosted.repository, ...parts].join('/');
+}
+
+function traderListUrl(categoryId, action = 'edit') {
+  const branch = model.hosted?.branch;
+  if (!branch) return null;
+  return githubUrl(action, branch.split('/').map(encodeURIComponent).join('/'), 'traders', `${categoryId}.txt`);
 }
 
 // ---------- unread tracking ----------
@@ -172,11 +208,21 @@ const seenKey = (id) => `ptt.seen.${id}`;
 const seenAt = (id) => Number(storage.get(seenKey(id))) || 0;
 const alertsIn = (id) => model.alerts.filter((alert) => alert.categories.includes(id));
 
+function recentAlerts() {
+  const since = Date.now() - DAY_MS;
+  return model.alerts.filter((alert) => alert.trade.timestamp * 1000 >= since);
+}
+
 function newestAlertTime(id) {
   return alertsIn(id).reduce((max, alert) => Math.max(max, alert.createdAt), 0);
 }
 
 function markSeen(id) {
+  if (id === RECENT.id) {
+    // The 24-hour list shows every category's notifications.
+    for (const category of model.categories) markSeen(category.id);
+    return;
+  }
   const newest = newestAlertTime(id);
   if (newest > seenAt(id)) storage.set(seenKey(id), String(newest));
 }
@@ -250,7 +296,7 @@ function notifyBrowser(alerts) {
           return `${d.who} ${d.verb} ${d.outcome} · ${d.usd}`;
         }).join('\n'),
         tag: 'ptt-batch',
-        icon: '/favicon.svg',
+        icon: 'favicon.svg',
       });
       return;
     }
@@ -259,12 +305,11 @@ function notifyBrowser(alerts) {
       const notification = new Notification(`${d.side} ${d.usd} · ${d.who}`, {
         body: `${d.verb} ${d.outcome} @ ${formatPrice(alert.trade.price)}\n${alert.trade.title ?? ''}`,
         tag: alert.id,
-        icon: '/favicon.svg',
+        icon: 'favicon.svg',
       });
       notification.onclick = () => {
         window.focus();
-        const category = alert.categories.find((id) => panels.has(id));
-        if (category) selectTab(category);
+        selectTab(RECENT.id);
         notification.close();
       };
     }
@@ -276,12 +321,19 @@ function notifyBrowser(alerts) {
 // ---------- rendering ----------
 
 function renderHeader() {
-  const usd = formatUsd(model.conditions.minTradeUsd).replace(/\.00$/, '');
   const interval = model.status?.intervalMinutes ?? 5;
-  els.conditions.textContent = `Polymarket · taker trades over ${usd} · checked every ${interval} min`;
+  els.conditions.textContent = `Polymarket · taker trades over ${minUsdLabel()} · checked every ${interval} min`;
+  if (HOSTED) {
+    const runs = githubUrl('actions', 'workflows', model.hosted?.workflow || 'tracker.yml');
+    els.checkNow.hidden = true;
+    els.testNotify.hidden = true;
+    els.runLink.hidden = !runs;
+    if (runs) els.runLink.href = runs;
+  }
 }
 
 function renderStatus() {
+  if (HOSTED) return renderHostedStatus();
   const status = model.status;
   const lastRun = status?.lastRun;
   let dot = '';
@@ -307,43 +359,75 @@ function renderStatus() {
     }
     text = parts.join(' · ');
   }
-  els.statusDot.className = `status-dot ${dot}`;
-  els.statusText.textContent = text;
-  els.statusText.title = title;
+  setStatus(dot, text, title);
   els.checkNow.disabled = !status || status.running || !model.connected;
   els.checkNow.textContent = status?.running ? 'Checking…' : 'Check now';
 }
 
+function renderHostedStatus() {
+  const updated = model.generatedAt;
+  const interval = model.status?.intervalMinutes ?? 5;
+  const errors = model.status?.lastRun?.errors ?? [];
+  if (!updated) return setStatus('', 'Loading…');
+  const parts = [`Updated ${timeAgo(updated)}`];
+  let dot = 'ok';
+  let title = `Data from ${formatDate(updated)}. GitHub Actions checks Polymarket every ${interval} minutes.`;
+  if (model.refreshError) {
+    dot = 'error';
+    parts.push(`refresh failed (${model.refreshError})`);
+  } else if (Date.now() - updated > Math.max(30, interval * 4) * 60_000) {
+    dot = 'error';
+    parts.push('the scheduled check looks paused');
+    title = 'Open "Runs on GitHub" to see the latest scheduled runs.';
+  } else if (errors.length) {
+    dot = 'error';
+    parts.push(`${plural(errors.length, 'account')} failed`);
+    title = errors.map((error) => `${error.address}: ${error.message}`).join('\n');
+  }
+  setStatus(dot, parts.join(' · '), title);
+}
+
+function setStatus(dot, text, title = '') {
+  els.statusDot.className = `status-dot ${dot}`;
+  els.statusText.textContent = text;
+  els.statusText.title = title;
+}
+
 function renderChannels() {
-  els.channelList.replaceChildren(...model.channels.map((channel) => h('li', {
-    class: `channel${channel.configured ? ' on' : ''}`,
-    title: channel.configured ? `${channel.name} notifications are on` : `${channel.name} is off. ${channel.hint} in .env to enable it.`,
-  }, channel.name)));
+  els.channelList.replaceChildren(...model.channels.map((channel) => {
+    let title = `${channel.name} notifications are on`;
+    if (!channel.configured) {
+      title = HOSTED
+        ? `${channel.name} is off. Add it as a repository secret on GitHub (see the README).`
+        : `${channel.name} is off. ${channel.hint} in .env to enable it.`;
+    }
+    return h('li', { class: `channel${channel.configured ? ' on' : ''}`, title }, channel.name);
+  }));
 }
 
 function buildTabs() {
   tabRefs.clear();
-  els.tabs.replaceChildren(...model.categories.map((category) => {
+  els.tabs.replaceChildren(...views().map((view) => {
     const count = h('span', { class: 'tab-count' }, '0');
     const unread = h('span', { class: 'tab-unread', hidden: true });
     const button = h('button', {
       type: 'button',
       role: 'tab',
       class: 'tab',
-      id: `tab-${category.id}`,
-      'aria-controls': `panel-${category.id}`,
+      id: `tab-${view.id}`,
+      'aria-controls': `panel-${view.id}`,
       'aria-selected': 'false',
       tabindex: '-1',
-      onclick: () => selectTab(category.id),
+      onclick: () => selectTab(view.id),
       onkeydown: onTabKeydown,
-    }, category.name, count, unread);
-    tabRefs.set(category.id, { button, count, unread });
+    }, view.name, count, unread);
+    tabRefs.set(view.id, { button, count, unread });
     return button;
   }));
 }
 
 function onTabKeydown(event) {
-  const ids = model.categories.map((category) => category.id);
+  const ids = views().map((view) => view.id);
   const index = ids.indexOf(activeTab);
   const next = {
     ArrowRight: ids[(index + 1) % ids.length],
@@ -359,24 +443,53 @@ function onTabKeydown(event) {
 
 function buildPanels() {
   panels.clear();
-  els.panels.replaceChildren(...model.categories.map((category) => {
+  const recent = buildRecentPanel();
+  panels.set(RECENT.id, recent);
+  els.panels.replaceChildren(recent.root, ...model.categories.map((category) => {
     const refs = buildPanel(category);
     panels.set(category.id, refs);
     return refs.root;
   }));
 }
 
+function buildRecentPanel() {
+  const refs = {
+    count: h('span', { class: 'count' }),
+    chips: h('div', { class: 'chips' }),
+    summary: h('dl', { class: 'summary' }),
+    list: h('ol', { class: 'alert-list', 'aria-label': 'Notifications from the last 24 hours' }),
+    empty: h('p', { class: 'empty' },
+      h('strong', {}, 'No notifications in the last 24 hours'),
+      'Qualifying trades by any tracked account will be listed here, newest first.'),
+  };
+  refs.root = h('section', {
+    class: 'panel',
+    id: `panel-${RECENT.id}`,
+    role: 'tabpanel',
+    'aria-labelledby': `tab-${RECENT.id}`,
+    hidden: true,
+  },
+  h('div', { class: 'card' },
+    h('div', { class: 'card-head' }, h('h2', {}, 'Notifications in the last 24 hours', refs.count), refs.chips),
+    refs.summary,
+    refs.list,
+    refs.empty));
+  return refs;
+}
+
 function buildPanel(category) {
   const input = h('input', {
+    id: `add-input-${category.id}`,
     name: 'input',
     type: 'text',
     required: true,
     autocomplete: 'off',
     spellcheck: 'false',
-    placeholder: '0x… wallet, profile URL or @username',
+    placeholder: HOSTED ? '0x… wallet or polymarket.com/profile/0x… link' : '0x… wallet, profile URL or @username',
     'aria-label': `Account to track in ${category.name}`,
   });
   const label = h('input', {
+    id: `add-label-${category.id}`,
     name: 'label',
     type: 'text',
     maxlength: '60',
@@ -385,22 +498,29 @@ function buildPanel(category) {
     'aria-label': 'Optional label for this account',
   });
   const submit = h('button', { type: 'submit', class: 'btn btn-primary' }, `Add to ${category.name}`);
-  const formMsg = h('p', { class: 'form-msg', role: 'status' });
+  const formMsg = h('div', { class: 'form-msg', role: 'status' });
   const form = h('form', { class: 'add-form', novalidate: true }, input, label, submit);
-  form.addEventListener('submit', (event) => addTrader(event, category, { input, label, submit, formMsg }));
+  const formRefs = { input, label, submit, formMsg };
+  form.addEventListener('submit', (event) => (HOSTED ? addTraderHosted : addTrader)(event, category, formRefs));
   input.addEventListener('input', () => {
-    if (formMsg.classList.contains('error')) {
-      formMsg.className = 'form-msg';
-      formMsg.textContent = '';
-    }
+    if (formMsg.classList.contains('error')) setFormMsg(formMsg, '', '');
   });
+
+  const note = HOSTED
+    ? h('p', { class: 'card-note' },
+      'This list comes from ',
+      h('code', {}, `traders/${category.id}.txt`),
+      ' in the GitHub repository. ',
+      externalLink(traderListUrl(category.id), { class: 'text-link' }, 'Edit it on GitHub'),
+      ' to add or remove accounts.')
+    : h('p', { class: 'card-note' }, 'Every account below is checked for new trades on each run.');
 
   const refs = {
     traderCount: h('span', { class: 'count' }),
     traderList: h('ul', { class: 'trader-list', 'aria-label': `Accounts tracked in ${category.name}` }),
     tradersEmpty: h('p', { class: 'empty' },
       h('strong', {}, `No accounts in ${category.name} yet`),
-      'Add a wallet address, profile link or @username above.'),
+      HOSTED ? 'Add a wallet address above.' : 'Add a wallet address, profile link or @username above.'),
     alertCount: h('span', { class: 'count' }),
     alertList: h('ol', { class: 'alert-list', 'aria-label': `Qualifying trades in ${category.name}` }),
     alertsEmpty: h('p', { class: 'empty' },
@@ -419,7 +539,7 @@ function buildPanel(category) {
   h('div', { class: 'panel-grid' },
     h('div', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, 'Tracked accounts', refs.traderCount)),
-      h('p', { class: 'card-note' }, `Every account below is checked for new trades on each run.`),
+      note,
       form,
       formMsg,
       refs.traderList,
@@ -429,6 +549,13 @@ function buildPanel(category) {
       refs.alertList,
       refs.alertsEmpty)));
   return refs;
+}
+
+function conditionChips() {
+  return [
+    h('span', { class: 'chip', title: "The tracked account's order crossed the spread" }, 'Price taker'),
+    h('span', { class: 'chip', title: 'Shares × price' }, `> ${minUsdLabel()}`),
+  ];
 }
 
 function avatar(trader) {
@@ -479,20 +606,25 @@ function traderRow(trader, category) {
     'aria-label': `Copy address of ${trader.displayName}`,
     onclick: () => copyText(trader.address),
   }, icon('copy'));
-  const refreshButton = h('button', {
-    type: 'button',
-    class: 'icon-btn',
-    title: 'Reload name from Polymarket',
-    'aria-label': `Reload profile of ${trader.displayName}`,
-  }, icon('refresh'));
-  refreshButton.addEventListener('click', () => refreshProfile(trader, refreshButton));
-  const removeButton = h('button', {
-    type: 'button',
-    class: 'icon-btn danger',
-    title: `Stop tracking in ${category.name}`,
-    'aria-label': `Stop tracking ${trader.displayName} in ${category.name}`,
-  }, icon('remove'));
-  removeButton.addEventListener('click', () => removeTrader(trader, category, removeButton));
+
+  let actions = null;
+  if (!HOSTED) {
+    const refreshButton = h('button', {
+      type: 'button',
+      class: 'icon-btn',
+      title: 'Reload name from Polymarket',
+      'aria-label': `Reload profile of ${trader.displayName}`,
+    }, icon('refresh'));
+    refreshButton.addEventListener('click', () => refreshProfile(trader, refreshButton));
+    const removeButton = h('button', {
+      type: 'button',
+      class: 'icon-btn danger',
+      title: `Stop tracking in ${category.name}`,
+      'aria-label': `Stop tracking ${trader.displayName} in ${category.name}`,
+    }, icon('remove'));
+    removeButton.addEventListener('click', () => removeTrader(trader, category, removeButton));
+    actions = h('div', { class: 'trader-actions' }, refreshButton, removeButton);
+  }
 
   return h('li', { class: 'trader' },
     avatar(trader),
@@ -503,19 +635,23 @@ function traderRow(trader, category) {
         secondary),
       h('div', { class: 'trader-address' }, h('code', {}, trader.address), copyButton)),
     h('div', { class: 'trader-meta' }, meta),
-    h('div', { class: 'trader-actions' }, refreshButton, removeButton));
+    actions);
 }
 
-function alertRow(alert) {
+function alertRow(alert, { showCategories = false } = {}) {
   const trade = alert.trade;
   const d = describeAlert(alert);
   const tsMs = trade.timestamp * 1000;
   const failures = Object.entries(alert.delivery ?? {}).filter(([, result]) => result !== true);
+  const categoryNames = showCategories
+    ? alert.categories.map((id) => model.categories.find((category) => category.id === id)?.name ?? id)
+    : [];
   return h('li', { class: `alert${freshAlertIds.has(alert.id) ? ' fresh' : ''}` },
     h('span', { class: `side-badge ${d.side}` }, d.side),
     h('div', { class: 'alert-head' },
       h('span', { class: 'alert-usd' }, d.usd),
       externalLink(alert.links?.profile, { class: 'alert-who', title: alert.trader.address }, d.who),
+      categoryNames.map((name) => h('span', { class: 'tag' }, name)),
       h('time', {
         class: 'alert-time',
         datetime: new Date(tsMs).toISOString(),
@@ -551,14 +687,30 @@ function renderAlerts(id) {
   const refs = panels.get(id);
   const alerts = alertsIn(id);
   refs.alertCount.textContent = alerts.length ? String(alerts.length) : '';
-  refs.alertList.replaceChildren(...alerts.slice(0, 200).map(alertRow));
+  refs.alertList.replaceChildren(...alerts.slice(0, 200).map((alert) => alertRow(alert)));
   refs.alertList.hidden = alerts.length === 0;
   refs.alertsEmpty.hidden = alerts.length > 0;
-  const usd = formatUsd(model.conditions.minTradeUsd).replace(/\.00$/, '');
-  refs.chips.replaceChildren(
-    h('span', { class: 'chip', title: "The tracked account's order crossed the spread" }, 'Price taker'),
-    h('span', { class: 'chip', title: 'Shares × price' }, `> ${usd}`),
+  refs.chips.replaceChildren(...conditionChips());
+}
+
+function renderRecent() {
+  const refs = panels.get(RECENT.id);
+  if (!refs) return;
+  const alerts = recentAlerts();
+  const total = alerts.reduce((sum, alert) => sum + alert.trade.usd, 0);
+  const accounts = new Set(alerts.map((alert) => alert.trader.address)).size;
+  const stat = (value, label) => h('div', { class: 'stat' }, h('dt', {}, label), h('dd', {}, value));
+  refs.count.textContent = alerts.length ? String(alerts.length) : '';
+  refs.chips.replaceChildren(...conditionChips());
+  refs.summary.replaceChildren(
+    stat(String(alerts.length), alerts.length === 1 ? 'Notification' : 'Notifications'),
+    stat(formatUsd(total), 'Total value'),
+    stat(String(accounts), accounts === 1 ? 'Account' : 'Accounts'),
   );
+  refs.summary.hidden = alerts.length === 0;
+  refs.list.replaceChildren(...alerts.map((alert) => alertRow(alert, { showCategories: true })));
+  refs.list.hidden = alerts.length === 0;
+  refs.empty.hidden = alerts.length > 0;
 }
 
 function renderBadges() {
@@ -567,23 +719,30 @@ function renderBadges() {
     const refs = tabRefs.get(category.id);
     const traders = model.traders.filter((trader) => trader.categories[category.id]).length;
     refs.count.textContent = String(traders);
-    refs.count.title = `${plural(traders, 'tracked account')}`;
+    refs.count.title = plural(traders, 'tracked account');
     const unread = unreadCount(category.id);
     total += unread;
     refs.unread.hidden = unread === 0;
     refs.unread.textContent = unread > 99 ? '99+' : String(unread);
-    refs.unread.title = `${plural(unread, 'new qualifying trade')}`;
+    refs.unread.title = plural(unread, 'new qualifying trade');
+  }
+  const recent = tabRefs.get(RECENT.id);
+  if (recent) {
+    const count = recentAlerts().length;
+    recent.count.textContent = String(count);
+    recent.count.title = `${plural(count, 'notification')} in the last 24 hours`;
   }
   document.title = total ? `(${total}) Trader Tracker` : 'Trader Tracker';
 }
 
 function renderAllTraders() {
-  for (const id of panels.keys()) renderTraders(id);
+  for (const category of model.categories) renderTraders(category.id);
   renderBadges();
 }
 
 function renderAllAlerts() {
-  for (const id of panels.keys()) renderAlerts(id);
+  for (const category of model.categories) renderAlerts(category.id);
+  renderRecent();
   renderBadges();
 }
 
@@ -600,11 +759,11 @@ function selectTab(id, { focus = false } = {}) {
   if (!panels.has(id)) return;
   activeTab = id;
   storage.set('ptt.tab', id);
-  for (const [categoryId, refs] of tabRefs) {
-    const selected = categoryId === id;
+  for (const [viewId, refs] of tabRefs) {
+    const selected = viewId === id;
     refs.button.setAttribute('aria-selected', String(selected));
     refs.button.tabIndex = selected ? 0 : -1;
-    panels.get(categoryId).root.hidden = !selected;
+    panels.get(viewId).root.hidden = !selected;
   }
   if (focus) tabRefs.get(id).button.focus();
   if (location.hash !== `#${id}`) history.replaceState(null, '', `#${id}`);
@@ -613,6 +772,11 @@ function selectTab(id, { focus = false } = {}) {
 }
 
 // ---------- actions ----------
+
+function setFormMsg(el, kind, ...content) {
+  el.className = `form-msg${kind ? ` ${kind}` : ''}`;
+  el.replaceChildren(...content);
+}
 
 function upsertTrader(trader) {
   const index = model.traders.findIndex((item) => item.address === trader.address);
@@ -624,14 +788,12 @@ async function addTrader(event, category, refs) {
   event.preventDefault();
   const input = refs.input.value.trim();
   if (!input) {
-    refs.formMsg.className = 'form-msg error';
-    refs.formMsg.textContent = 'Enter a wallet address, profile URL or @username.';
+    setFormMsg(refs.formMsg, 'error', 'Enter a wallet address, profile URL or @username.');
     refs.input.focus();
     return;
   }
   refs.submit.disabled = true;
-  refs.formMsg.className = 'form-msg';
-  refs.formMsg.textContent = 'Looking up the account on Polymarket…';
+  setFormMsg(refs.formMsg, '', 'Looking up the account on Polymarket…');
   try {
     const result = await api('POST', '/api/traders', {
       category: category.id,
@@ -643,16 +805,43 @@ async function addTrader(event, category, refs) {
     refs.input.value = '';
     refs.label.value = '';
     const name = result.trader.displayName;
-    refs.formMsg.className = `form-msg ${result.warning ? 'warning' : 'success'}`;
-    refs.formMsg.textContent = result.warning
-      ? `Added ${name}. ${result.warning}`
-      : `Now tracking ${name} in ${category.name}.`;
+    setFormMsg(
+      refs.formMsg,
+      result.warning ? 'warning' : 'success',
+      result.warning ? `Added ${name}. ${result.warning}` : `Now tracking ${name} in ${category.name}.`,
+    );
   } catch (err) {
-    refs.formMsg.className = 'form-msg error';
-    refs.formMsg.textContent = err.message;
+    setFormMsg(refs.formMsg, 'error', err.message);
   } finally {
     refs.submit.disabled = false;
   }
+}
+
+// On the static site there is no server to save to, so the form prepares the
+// line to add to traders/<category>.txt and links to GitHub's editor for it.
+function addTraderHosted(event, category, refs) {
+  event.preventDefault();
+  const match = /0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/.exec(refs.input.value);
+  if (!match) {
+    setFormMsg(refs.formMsg, 'error', 'Paste a 0x wallet address or a polymarket.com/profile/0x… link.');
+    refs.input.focus();
+    return;
+  }
+  const address = match[0].toLowerCase();
+  const existing = model.traders.find((trader) => trader.address === address && trader.categories[category.id]);
+  if (existing) {
+    setFormMsg(refs.formMsg, 'error', `${existing.displayName} is already tracked in ${category.name}.`);
+    return;
+  }
+  const line = [address, refs.label.value.trim()].filter(Boolean).join(' ');
+  const editUrl = traderListUrl(category.id);
+  navigator.clipboard?.writeText(line).catch(() => {});
+  setFormMsg(refs.formMsg, 'hosted',
+    h('span', {}, 'Add this line to ', h('code', {}, `traders/${category.id}.txt`), ' (copied):'),
+    h('code', { class: 'line-to-add' }, line),
+    h('span', {}, 'On GitHub, paste it on a new line and press ', h('strong', {}, 'Commit changes'),
+      '. The account appears here after the next check, within about 5 minutes.'),
+    editUrl && externalLink(editUrl, { class: 'btn btn-small' }, `Open ${category.id}.txt on GitHub`));
 }
 
 async function removeTrader(trader, category, button) {
@@ -724,7 +913,7 @@ async function sendTest() {
   try {
     if (browserActive()) {
       try {
-        new Notification('Test notification', { body: 'Browser alerts are working.', icon: '/favicon.svg', tag: 'ptt-test' });
+        new Notification('Test notification', { body: 'Browser alerts are working.', icon: 'favicon.svg', tag: 'ptt-test' });
       } catch {
         // see notifyBrowser
       }
@@ -754,14 +943,18 @@ async function sendTest() {
 
 // ---------- live updates ----------
 
-function addAlerts(alerts) {
-  const known = new Set(model.alerts.map((alert) => alert.id));
+function markFresh(alerts) {
   for (const alert of alerts) {
-    if (known.has(alert.id)) continue;
-    model.alerts.push(alert);
     freshAlertIds.add(alert.id);
     setTimeout(() => freshAlertIds.delete(alert.id), 4000);
   }
+}
+
+function addAlerts(alerts) {
+  const known = new Set(model.alerts.map((alert) => alert.id));
+  const added = alerts.filter((alert) => !known.has(alert.id));
+  model.alerts.push(...added);
+  markFresh(added);
   model.alerts.sort((a, b) => b.trade.timestamp - a.trade.timestamp || b.createdAt - a.createdAt);
   if (model.alerts.length > 2000) model.alerts.length = 2000;
   if (activeTab && !document.hidden) markSeen(activeTab);
@@ -808,18 +1001,43 @@ function connectEvents() {
   });
 }
 
+async function pollHosted() {
+  const known = new Set(model.alerts.map((alert) => alert.id));
+  const before = model.generatedAt;
+  try {
+    await loadState();
+    model.refreshError = null;
+  } catch (err) {
+    model.refreshError = err.message;
+    renderStatus();
+    return;
+  }
+  if (model.generatedAt === before) {
+    renderStatus();
+    return;
+  }
+  const added = model.alerts.filter((alert) => !known.has(alert.id));
+  markFresh(added);
+  if (activeTab && !document.hidden) markSeen(activeTab);
+  renderEverything();
+  notifyBrowser(added);
+}
+
 function tick() {
   for (const el of document.querySelectorAll('[data-ago]')) {
     el.textContent = `${el.dataset.prefix ?? ''}${timeAgo(Number(el.dataset.ago))}`;
   }
   renderStatus();
+  // Trades age out of the 24-hour list.
+  renderRecent();
+  renderBadges();
 }
 
 async function boot() {
   try {
     await loadState();
   } catch (err) {
-    els.statusText.textContent = `Could not reach the tracker (${err.message}). Retrying…`;
+    els.statusText.textContent = `Could not load the tracker data (${err.message}). Retrying…`;
     setTimeout(boot, 5000);
     return;
   }
@@ -830,15 +1048,13 @@ async function boot() {
   for (const category of model.categories) {
     if (storage.get(seenKey(category.id)) === null) storage.set(seenKey(category.id), String(newestAlertTime(category.id) || 1));
   }
-  const ids = model.categories.map((category) => category.id);
+  const ids = views().map((view) => view.id);
   const fromHash = location.hash.slice(1);
   const saved = storage.get('ptt.tab');
   renderEverything();
-  selectTab(ids.includes(fromHash) ? fromHash : ids.includes(saved) ? saved : ids[0]);
+  selectTab(ids.includes(fromHash) ? fromHash : ids.includes(saved) ? saved : RECENT.id);
 
-  els.checkNow.addEventListener('click', checkNow);
   els.browserToggle.addEventListener('click', toggleBrowserAlerts);
-  els.testNotify.addEventListener('click', sendTest);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && activeTab) {
       markSeen(activeTab);
@@ -846,7 +1062,13 @@ async function boot() {
     }
   });
   window.addEventListener('hashchange', () => selectTab(location.hash.slice(1)));
-  connectEvents();
+  if (HOSTED) {
+    setInterval(pollHosted, HOSTED_POLL_MS);
+  } else {
+    els.checkNow.addEventListener('click', checkNow);
+    els.testNotify.addEventListener('click', sendTest);
+    connectEvents();
+  }
   setInterval(tick, 15_000);
 }
 

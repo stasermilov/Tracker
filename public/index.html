@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Trader Tracker</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
 </head>
 <body>
   <div class="container">
     <header class="topbar">
       <div class="brand">
-        <img class="brand-mark" src="/favicon.svg" alt="" width="36" height="36">
+        <img class="brand-mark" src="favicon.svg" alt="" width="36" height="36">
         <div>
           <h1>Trader Tracker</h1>
           <p class="brand-sub" id="conditions-summary">Polymarket taker trades</p>
@@ -23,6 +23,7 @@
         <span class="status-dot" id="status-dot" aria-hidden="true"></span>
         <span class="status-text" id="status-text" role="status" aria-live="polite">Connecting…</span>
         <button type="button" class="btn" id="check-now">Check now</button>
+        <a class="btn" id="run-link" target="_blank" rel="noopener noreferrer" hidden>Runs on GitHub</a>
       </div>
     </header>
 

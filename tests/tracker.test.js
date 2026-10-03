@@ -123,7 +123,7 @@ describe('Tracker', () => {
   let tracker;
   let nowMs;
 
-  async function setup(seed = { ai: [ALICE], geopolitics: [] }, { backfillHours = 0 } = {}) {
+  async function setup(seed = { ai: [ALICE], geopolitics: [] }, { backfillHours = 0, notifyMaxAgeMinutes = 0 } = {}) {
     store = new Store({
       file: path.join(dir, 'state.json'),
       now: () => nowMs,
@@ -138,7 +138,7 @@ describe('Tracker', () => {
       store,
       client,
       notifier,
-      config: { pollIntervalMinutes: 5, minTradeUsd: 30, lateTradeGraceMinutes: 60, backfillHours },
+      config: { pollIntervalMinutes: 5, minTradeUsd: 30, lateTradeGraceMinutes: 60, backfillHours, notifyMaxAgeMinutes },
       logger: quiet,
       now: () => nowMs,
       requestSpacingMs: 0,
@@ -199,6 +199,43 @@ describe('Tracker', () => {
     assert.equal(trader.trackingSince, T0 - 3 * 3600);
     run = await tracker.runCheck();
     assert.equal(run.newAlerts, 1);
+  });
+
+  test('NOTIFY_MAX_AGE_MINUTES lists older trades without sending them', async () => {
+    await setup({ ai: [ALICE], geopolitics: [] }, { backfillHours: 24, notifyMaxAgeMinutes: 60 });
+    client.trades[ALICE] = [
+      tradeRow({ timestamp: T0 - 600, key: 'ten-minutes-ago' }),
+      tradeRow({ timestamp: T0 - 5 * 3600, key: 'five-hours-ago' }),
+    ];
+    const run = await tracker.runCheck();
+    assert.equal(run.newAlerts, 2, 'both are listed');
+    assert.deepEqual(notifier.batches.map((batch) => batch.map((alert) => alert.trade.timestamp)), [[T0 - 600]]);
+    const old = store.state.alerts.find((alert) => alert.trade.timestamp === T0 - 5 * 3600);
+    assert.equal(old.delivery, undefined);
+  });
+
+  test('syncTraders makes the tracked accounts match the list files', async () => {
+    await setup({ ai: [ALICE, BOB], geopolitics: [] }, { backfillHours: 2 });
+    nowMs += 60_000;
+    const NEW = '0x1111111111111111111111111111111111111111';
+    const changes = tracker.syncTraders({
+      ai: [{ address: ALICE, label: 'Alice' }],
+      geopolitics: [{ address: ALICE, label: null }, { address: NEW, label: null }],
+    });
+    assert.deepEqual(changes, {
+      added: [`${ALICE} (geopolitics)`, `${NEW} (geopolitics)`],
+      removed: [`${BOB} (ai)`],
+    });
+    const { traders } = store.state;
+    assert.equal(traders[BOB], undefined);
+    assert.deepEqual(Object.keys(traders[ALICE].categories).sort(), ['ai', 'geopolitics']);
+    assert.equal(traders[ALICE].label, 'Alice');
+    assert.equal(traders[ALICE].trackingSince, T0 - 2 * 3600, 'existing accounts keep their tracking start');
+    assert.equal(traders[NEW].trackingSince, T0 + 60 - 2 * 3600);
+    assert.deepEqual(tracker.syncTraders({
+      ai: [{ address: ALICE, label: 'Alice' }],
+      geopolitics: [{ address: ALICE, label: null }, { address: NEW, label: null }],
+    }), { added: [], removed: [] }, 'syncing again changes nothing');
   });
 
   test('passes the minimum amount and look-back floor to the client', async () => {

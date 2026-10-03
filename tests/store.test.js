@@ -22,7 +22,7 @@ test('first start tracks the nine seeded AI accounts and saves them', async () =
   const state = await store.load();
   const addresses = Object.keys(state.traders);
   assert.equal(addresses.length, 9);
-  assert.deepEqual(addresses, SEED_TRADERS.ai);
+  assert.deepEqual(addresses, SEED_TRADERS.ai.map((entry) => entry.address));
   for (const trader of Object.values(state.traders)) {
     assert.deepEqual(Object.keys(trader.categories), ['ai']);
     assert.equal(trader.trackingSince, 1_790_000_000);

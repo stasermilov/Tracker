@@ -1,0 +1,98 @@
+# Runs the tracker on GitHub's servers every 5 minutes: checks Polymarket,
+# sends notifications (configured as repository secrets) and publishes the
+# dashboard to GitHub Pages. Tracked accounts come from traders/*.txt.
+#
+# One-time setup for the dashboard:
+#   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+name: Tracker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write # keeps tracker state on the tracker-state branch
+  pages: write
+  id-token: write
+
+concurrency:
+  group: tracker
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      publish: ${{ steps.pages.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Restore saved state
+        run: |
+          mkdir -p data
+          if git fetch --quiet --depth=1 origin tracker-state 2>/dev/null; then
+            git show FETCH_HEAD:state.json > data/state.json
+            echo "Restored state from the tracker-state branch."
+          else
+            echo "No saved state yet: starting fresh."
+          fi
+
+      - name: Check Polymarket and send notifications
+        env:
+          # A newly listed account's last 24 hours show up in the dashboard,
+          # but only trades from the last hour are sent as notifications.
+          BACKFILL_HOURS: "24"
+          NOTIFY_MAX_AGE_MINUTES: "60"
+          MIN_TRADE_USD: ${{ vars.MIN_TRADE_USD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: node src/run-once.js --site _site
+
+      - name: Save state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd data
+          git init --quiet --initial-branch=tracker-state
+          git add state.json
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit --quiet -m "Tracker state"
+          git push --quiet --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" tracker-state
+
+      - uses: actions/configure-pages@v5
+        id: pages
+        continue-on-error: true
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outcome == 'success'
+        with:
+          path: _site
+
+      - name: Explain how to publish the dashboard
+        if: steps.pages.outcome != 'success'
+        run: |
+          echo "::warning title=Dashboard not published::Turn on GitHub Pages: Settings -> Pages -> Build and deployment -> Source: GitHub Actions. Notifications work without it."
+
+  deploy:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

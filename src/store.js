@@ -35,13 +35,16 @@ export function newTraderRecord(address, nowMs, backfillSeconds = 0) {
   };
 }
 
+/** `seed` maps a category id to addresses or `{address, label}` entries. */
 export function createInitialState(nowMs, seed = SEED_TRADERS, backfillSeconds = 0) {
   const traders = {};
-  for (const [category, addresses] of Object.entries(seed)) {
-    for (const address of addresses) {
+  for (const [category, entries] of Object.entries(seed)) {
+    for (const entry of entries) {
+      const { address, label = null } = typeof entry === 'string' ? { address: entry } : entry;
       const key = address.toLowerCase();
       traders[key] ??= newTraderRecord(key, nowMs, backfillSeconds);
       traders[key].categories[category] = { addedAt: nowMs };
+      traders[key].label ||= label;
     }
   }
   return { version: STATE_VERSION, createdAt: nowMs, traders, alerts: [] };

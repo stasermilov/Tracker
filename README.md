@@ -9,11 +9,20 @@ that meets these conditions:
 Accounts are organised in two tabs, **AI** and **Geopolitics**, each with its own list. Every account is checked
 **every 5 minutes**.
 
+There are two ways to run it:
+
+- **On GitHub, with no server of your own** ([setup](#run-it-on-github-no-server-needed)). GitHub Actions does
+  the checks and sends the notifications, and the dashboard is published as a web page on GitHub Pages.
+- **On your own computer or server** ([quick start](#quick-start)). The dashboard is served by the app itself,
+  and you can add or remove accounts directly in it.
+
 ## Features
 
-- **Dashboard** with an AI tab and a Geopolitics tab. Each tab lists its tracked accounts with their Polymarket
-  name and full wallet address (ID), plus a feed of the qualifying trades found for them.
-- **Pre-loaded AI accounts**: the nine requested accounts are tracked from the first start.
+- **Dashboard** with a **Last 24 hours** list of every notification, plus an AI tab and a Geopolitics tab. Each
+  category tab lists its tracked accounts with their Polymarket name and full wallet address (ID), plus the
+  qualifying trades found for them.
+- **Pre-loaded AI accounts**: the nine requested accounts (listed in [`traders/ai.txt`](traders/ai.txt)) are
+  tracked from the first start.
 - **Add accounts** to either tab with a wallet address, a `polymarket.com/profile/0x…` link or an `@username`.
   Display names are loaded from the Polymarket profile. Optionally give an account your own label. One account can
   be in both tabs.
@@ -23,6 +32,39 @@ Accounts are organised in two tabs, **AI** and **Geopolitics**, each with its ow
 - **Live updates**: new trades appear in the dashboard without a reload. There is also a **Check now** button and
   a **Send test** button for notifications.
 - **No dependencies**: plain Node.js; state is kept in a JSON file.
+
+## Run it on GitHub (no server needed)
+
+The workflow in [`.github/workflows/tracker.yml`](.github/workflows/tracker.yml) runs every 5 minutes on GitHub's
+servers. Each run checks Polymarket, sends notifications and publishes the dashboard. GitHub Actions is free for
+public repositories.
+
+1. **Publish the dashboard.** In the repository go to **Settings → Pages → Build and deployment → Source** and
+   choose **GitHub Actions**. After the next run the dashboard is at
+   `https://<your-github-username>.github.io/<repository>/`, for this repository
+   <https://stasermilov.github.io/Tracker/>.
+2. **Set up notifications** (optional). Go to **Settings → Secrets and variables → Actions → New repository
+   secret** and add the same names as in the [Notifications](#notifications) table, for example `NTFY_TOPIC`, or
+   `TELEGRAM_BOT_TOKEN` plus `TELEGRAM_CHAT_ID`. To change the $30 threshold, add a repository *variable*
+   `MIN_TRADE_USD`.
+3. **Run it once now** (optional): **Actions → Tracker → Run workflow**. Otherwise it starts on its own within
+   about 5 minutes.
+
+**Managing accounts:** the tracked accounts are the lines in [`traders/ai.txt`](traders/ai.txt) and
+[`traders/geopolitics.txt`](traders/geopolitics.txt). Put one wallet address per line, optionally followed by a
+space and a label. Edit them on GitHub (pencil icon → **Commit changes**). The **Add** form on the published
+dashboard prepares the line for you and opens the right file. Changes apply on the next run.
+
+Good to know:
+
+- The first check of a newly listed account fills the dashboard with its qualifying trades from the past 24 hours.
+  Only trades from the last hour are sent as notifications, so you are not flooded with old ones.
+- GitHub can start scheduled runs a few minutes late when it is busy, so alerts may lag a little behind the trade.
+- The published dashboard is public, like the repository. Its data comes from Polymarket's public API.
+- Between runs, the tracker remembers what it has already reported on the `tracker-state` branch.
+- To pause it: **Actions → Tracker → ⋯ → Disable workflow**. GitHub also pauses scheduled workflows after 60 days
+  without repository activity. Re-enable it on the same page.
+- If you also run the app yourself with the same notification settings, you will get every notification twice.
 
 ## Quick start
 
@@ -131,6 +173,7 @@ All settings are optional environment variables, which can be put in `.env`.
 | `DATA_DIR` | `./data` | Where `state.json` (tracked accounts, alert history) is stored. |
 | `LATE_TRADE_GRACE_MINUTES` | `60` | How late a trade may show up in the API and still alert. |
 | `BACKFILL_HOURS` | `0` | When an account starts being tracked, also alert on its qualifying trades from the past N hours. |
+| `NOTIFY_MAX_AGE_MINUTES` | `0` (no limit) | Only send notifications for trades at most this old; older ones are still listed. |
 | `MAX_ALERTS` | `1000` | Alert history size. |
 | `POLYMARKET_TRADES_API` | `auto` | `auto`, `v2` or `v1`. Selects the trades endpoint. |
 | `POLYMARKET_DATA_API_URL`, `POLYMARKET_GAMMA_API_URL` | Polymarket | Override the API base URLs. |
@@ -170,6 +213,9 @@ src/tracker.js      polling schedule, qualifying-trade detection, account manage
 src/notifier.js     Telegram / Discord / Slack / ntfy / webhook delivery
 src/store.js        JSON state persistence
 src/server.js       HTTP API, live event stream, static dashboard
+src/run-once.js     single check for scheduled runs; writes the static dashboard
+traders/            tracked accounts per tab (seed list; source of truth on GitHub)
 public/             dashboard (vanilla HTML/CSS/JS)
 tests/              test suite and Polymarket API mock
+.github/workflows/  the scheduled GitHub Actions run
 ```

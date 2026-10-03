@@ -163,6 +163,7 @@ export class Tracker extends EventEmitter {
     this.intervalMs = Math.round(config.pollIntervalMinutes * 60_000);
     this.graceSeconds = Math.round(config.lateTradeGraceMinutes * 60);
     this.backfillSeconds = Math.round((config.backfillHours ?? 0) * 3600);
+    this.notifyMaxAgeSeconds = Math.round((config.notifyMaxAgeMinutes ?? 0) * 60);
   }
 
   /** Starts the polling schedule; the first check runs after `initialDelayMs`. */
@@ -309,10 +310,19 @@ export class Tracker extends EventEmitter {
 
   async #deliver(alerts) {
     if (!this.notifier.enabled) return;
+    let due = alerts;
+    if (this.notifyMaxAgeSeconds > 0) {
+      const nowSec = Math.floor(this.now() / 1000);
+      due = alerts.filter((alert) => nowSec - alert.trade.timestamp <= this.notifyMaxAgeSeconds);
+      if (due.length < alerts.length) {
+        this.logger.info(`Listed ${alerts.length - due.length} older trade(s) without sending notifications (NOTIFY_MAX_AGE_MINUTES)`);
+      }
+      if (!due.length) return;
+    }
     try {
-      const results = await this.notifier.notifyAlerts(alerts);
-      for (const alert of alerts) alert.delivery = results.get(alert.id) ?? {};
-      this.emit('delivery', alerts.map((alert) => ({ id: alert.id, delivery: alert.delivery })));
+      const results = await this.notifier.notifyAlerts(due);
+      for (const alert of due) alert.delivery = results.get(alert.id) ?? {};
+      this.emit('delivery', due.map((alert) => ({ id: alert.id, delivery: alert.delivery })));
       await this.store.save();
     } catch (err) {
       this.logger.error(`Sending notifications failed: ${describeError(err)}`);
@@ -440,6 +450,49 @@ export class Tracker extends EventEmitter {
     this.emit('traders');
     this.logger.info(`Now tracking ${displayName(trader)} (${address}) in ${category.name}`);
     return { trader: publicTrader(trader), created, warning: notes.join(' ') || null };
+  }
+
+  /**
+   * Makes the tracked accounts match `lists` (categoryId -> [{address, label}]),
+   * which is the source of truth when running from traders/*.txt. Accounts
+   * that are new to the tracker start at now minus BACKFILL_HOURS.
+   * @returns {{added: string[], removed: string[]}} "address (category)" items
+   */
+  syncTraders(lists) {
+    const wanted = new Map();
+    for (const category of CATEGORIES) {
+      for (const { address, label } of lists[category.id] ?? []) {
+        const entry = wanted.get(address) ?? { categories: new Set(), label: null };
+        entry.categories.add(category.id);
+        entry.label ||= label;
+        wanted.set(address, entry);
+      }
+    }
+
+    const { traders } = this.store.state;
+    const nowMs = this.now();
+    const added = [];
+    const removed = [];
+    for (const [address, trader] of Object.entries(traders)) {
+      for (const categoryId of Object.keys(trader.categories)) {
+        if (wanted.get(address)?.categories.has(categoryId)) continue;
+        delete trader.categories[categoryId];
+        removed.push(`${address} (${categoryId})`);
+      }
+      if (Object.keys(trader.categories).length === 0) delete traders[address];
+    }
+    for (const [address, entry] of wanted) {
+      traders[address] ??= newTraderRecord(address, nowMs, this.backfillSeconds);
+      const trader = traders[address];
+      for (const categoryId of entry.categories) {
+        if (trader.categories[categoryId]) continue;
+        trader.categories[categoryId] = { addedAt: nowMs };
+        added.push(`${address} (${categoryId})`);
+      }
+      trader.label = entry.label;
+    }
+    if (added.length || removed.length) this.emit('traders');
+    return { added, removed };
   }
 
   #assertNotTracked(address, category) {

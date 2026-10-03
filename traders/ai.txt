@@ -1,0 +1,13 @@
+# Polymarket accounts tracked in the AI tab.
+# One wallet address (or polymarket.com/profile/0x... link) per line. Text after
+# the address, separated by a space, is shown as the account's label.
+# Lines starting with # are ignored.
+0x9aeb534c42b58b21673d5e03e9da14fbd15b2729
+0x2110ba2a1e18840109482ff4ddc547baeff45850
+0xb10047d6a254b2ebb306d7a7d13bf59171ab6461
+0x736539924a5602b37a03a54fc12c1cc8f98964da
+0xbf93328f8b69273453228a82c913207731822fd7
+0x8a4c788f043023b8b28a762216d037e9f148532b
+0x564f22744b7941ade18d5e0e4f347c30e3057026
+0x28b291aa82da13e1d58993873806c92908d5eb4f
+0xb89f5425341719d298dc2f5b9a92374f5fde1c44
