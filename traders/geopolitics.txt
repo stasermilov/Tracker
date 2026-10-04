@@ -2,3 +2,11 @@
 # One wallet address (or polymarket.com/profile/0x... link) per line. Text after
 # the address, separated by a space, is shown as the account's label.
 # Lines starting with # are ignored.
+0xf2f6af4f27ec2dcf4072095ab804016e14cd5817
+0xde7be6d489bce070a959e0cb813128ae659b5f4b
+0x9b979a065641e8cfde3022a30ed2d9415cf55e12
+0x44c1dfe43260c94ed4f1d00de2e1f80fb113ebc1
+0xc6587b11a2209e46dfe3928b31c5514a8e33b784
+0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b
+0x1cc16713196d456f86fa9c7387dd326a7f73b8df
+0xd189664c5308903476f9f079820431e4fd7d06f4
