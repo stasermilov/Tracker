@@ -33,7 +33,7 @@ test('a missing list file is an empty list', async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test('the repository lists track the nine requested AI accounts', () => {
+test('the repository lists track the requested AI and Geopolitics accounts', () => {
   const { lists, errors } = readTraderLists(TRADERS_DIR, ['ai', 'geopolitics']);
   assert.deepEqual(errors, []);
   assert.deepEqual(lists.ai.map((entry) => entry.address), [
@@ -47,5 +47,14 @@ test('the repository lists track the nine requested AI accounts', () => {
     '0x28b291aa82da13e1d58993873806c92908d5eb4f',
     '0xb89f5425341719d298dc2f5b9a92374f5fde1c44',
   ]);
-  assert.deepEqual(lists.geopolitics, []);
+  assert.deepEqual(lists.geopolitics.map((entry) => entry.address), [
+    '0xf2f6af4f27ec2dcf4072095ab804016e14cd5817',
+    '0xde7be6d489bce070a959e0cb813128ae659b5f4b',
+    '0x9b979a065641e8cfde3022a30ed2d9415cf55e12',
+    '0x44c1dfe43260c94ed4f1d00de2e1f80fb113ebc1',
+    '0xc6587b11a2209e46dfe3928b31c5514a8e33b784',
+    '0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b',
+    '0x1cc16713196d456f86fa9c7387dd326a7f73b8df',
+    '0xd189664c5308903476f9f079820431e4fd7d06f4',
+  ]);
 });

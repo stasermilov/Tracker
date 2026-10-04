@@ -17,18 +17,19 @@ beforeEach(async () => {
 
 afterEach(() => fs.rm(dir, { recursive: true, force: true }));
 
-test('first start tracks the nine seeded AI accounts and saves them', async () => {
+test('first start tracks the accounts from the list files and saves them', async () => {
   const store = new Store({ file, now: () => 1_790_000_000_000, logger: quiet });
   const state = await store.load();
-  const addresses = Object.keys(state.traders);
-  assert.equal(addresses.length, 9);
-  assert.deepEqual(addresses, SEED_TRADERS.ai.map((entry) => entry.address));
-  for (const trader of Object.values(state.traders)) {
-    assert.deepEqual(Object.keys(trader.categories), ['ai']);
-    assert.equal(trader.trackingSince, 1_790_000_000);
+  for (const [category, entries] of Object.entries(SEED_TRADERS)) {
+    for (const { address } of entries) {
+      assert.ok(state.traders[address]?.categories[category], `${address} in ${category}`);
+    }
   }
+  const expected = new Set(Object.values(SEED_TRADERS).flat().map((entry) => entry.address));
+  assert.equal(Object.keys(state.traders).length, expected.size);
+  for (const trader of Object.values(state.traders)) assert.equal(trader.trackingSince, 1_790_000_000);
   const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-  assert.equal(Object.keys(saved.traders).length, 9);
+  assert.equal(Object.keys(saved.traders).length, expected.size);
 });
 
 test('BACKFILL_HOURS moves the seeded accounts\' tracking start back', async () => {
@@ -58,7 +59,7 @@ test('an unreadable state file is moved aside and replaced', async () => {
   await fs.writeFile(file, '{ not json');
   const store = new Store({ file, now: () => 42, logger: quiet });
   await store.load();
-  assert.equal(Object.keys(store.state.traders).length, 9);
+  assert.ok(Object.keys(store.state.traders).length >= 9);
   assert.equal(await fs.readFile(`${file}.corrupt-42`, 'utf8'), '{ not json');
 });
 
